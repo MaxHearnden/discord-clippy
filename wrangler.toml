@@ -1,6 +1,7 @@
 name = "discord-clippy"
 main = "src/index.ts"
 compatibility_date = "2024-02-08"
+account_id = "1331459667d8e9b38bd131fea1382cd4"
 
 [triggers]
 crons = ["0 * * * *"]
