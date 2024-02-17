@@ -8,25 +8,172 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
+type Author = {
+	name: string,
+	url?: string,
+	icon_url?: string,
+}
+
+type Field = {
+	name: string,
+	value: string,
+	inline?: boolean
+}
+
+type Image = {
+	url: string,
+}
+
+type Embed = {
+	title: string,
+	description: string,
+	url?: string,
+	author: Author,
+	color: number,
+	fields?: Field[],
+	image?: Image,
+}
+
+type Message = {
+	embeds: Embed[]
+}
+
+type Event = {
+	id: number,
+	name: string,
+	location: string,
+	mazemapLink: string,
+	summary: string,
+	description: string,
+	slides: string,
+	organizer: string,
+	difficulty: string,
+	image: string,
+	unixStartTime: number,
+	unixEndTime: number,
+	hidden: boolean,
+}
+
 export interface Env {
-	// Example binding to KV. Learn more at https://developers.cloudflare.com/workers/runtime-apis/kv/
-	// MY_KV_NAMESPACE: KVNamespace;
-	//
-	// Example binding to Durable Object. Learn more at https://developers.cloudflare.com/workers/runtime-apis/durable-objects/
-	// MY_DURABLE_OBJECT: DurableObjectNamespace;
-	//
-	// Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
-	// MY_BUCKET: R2Bucket;
-	//
-	// Example binding to a Service. Learn more at https://developers.cloudflare.com/workers/runtime-apis/service-bindings/
-	// MY_SERVICE: Fetcher;
-	//
-	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
-	// MY_QUEUE: Queue;
+	DISCORD_ID: string,
+	DISCORD_TOKEN: string,
 }
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		return new Response('Hello World!');
+		if (request.headers.get('X-Clippy') !== 'true') {
+			throw new Error('Missing header')
+		}
+		const res = await publishEvents(env)
+		return new Response(JSON.stringify(res) || 'ok')
+	},
+
+	async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+		await publishEvents(env)
 	},
 };
+
+async function publishEvents(env: Env) {
+	const events = await getEvents()
+	const embeds = events.map(formatEvent)
+	return await postEmbeds(env, embeds).then(res => res.map(r => r.json()))
+}
+
+async function getEvents(): Promise<Event[]> {
+	const events: Event[] = await fetch('https://compsoc.io/api/events/all')
+		.then(res => res.json())
+	const thresholdStamp = new Date().getTime() / 1000 + 7 * 24 * 60 * 60
+	return events.filter((event: Event) => event.unixStartTime < thresholdStamp && !event.hidden)
+}
+
+function formatEvent(event: Event): Embed {
+	let description = `:calendar_spiral: ${unixAnySpan(event.unixStartTime, event.unixEndTime)}\n`
+	description += `:map: ${event.location}`
+	if (event.mazemapLink)
+		description += ` [Mazemap](${event.mazemapLink})`
+	description += '\n\n'
+	description += `${event.summary}\n\n${event.description}`
+	return {
+		title: event.name,
+		url: `https://compsoc.io/events/${event.id}`,
+		description,
+		author: {
+			name: event.organizer,
+		},
+		color: 0xd14537,
+		image: event.image ? { url: event.image } : undefined,
+	}
+}
+
+async function postEmbeds(env: Env, embeds: Embed[]): Promise<any[]> {
+	if (embeds.length == 0)
+		return []
+	if (embeds.length > 10) {
+		const res = await postEmbeds(env, embeds.slice(0, 10))
+		res.push(...await postEmbeds(env, embeds.slice(10)))
+		return res
+	}
+	return [await post(env, { embeds })]
+}
+
+async function post(env: Env, message: Message) {
+	return await fetch(
+		`https://discord.com/api/webhooks/${env.DISCORD_ID}/${env.DISCORD_TOKEN}`,
+		{
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(message),
+		}
+	)
+}
+
+
+
+function unixToDate(date: number): Date {
+	return new Date(date * 1000);
+}
+
+function fullDate(date: Date) {
+	return date.toLocaleString("en-GB", {
+		timeZone: "utc",
+		weekday: "long",
+		day: "numeric",
+		month: "long",
+		hour: "numeric",
+		minute: "numeric",
+		hour12: false,
+	});
+}
+
+function justTime(date: Date) {
+	return date.toLocaleString("en-GB", {
+		timeZone: "utc",
+		hour: "numeric",
+		minute: "numeric",
+		hour12: false,
+	});
+}
+
+function unixToTimespan(start: number, end: number) {
+	const startDate = unixToDate(start);
+	const endDate = unixToDate(end);
+	return `${fullDate(startDate)} to ${justTime(endDate)}`;
+}
+
+function unixToDatespan(start: number, end: number) {
+	const startDate = unixToDate(start);
+	const endDate = unixToDate(end);
+	return `${fullDate(startDate)} to ${fullDate(endDate)}`;
+}
+
+function unixAnySpan(start: number, end: number) {
+	const startDate = unixToDate(start).toDateString();
+	const endDate = unixToDate(end).toDateString();
+	if (startDate === endDate) {
+		return unixToTimespan(start, end);
+	} else {
+		return unixToDatespan(start, end);
+	}
+}
