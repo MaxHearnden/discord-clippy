@@ -35,7 +35,8 @@ type Embed = {
 }
 
 type Message = {
-	embeds: Embed[]
+	embeds?: Embed[]
+	content?: string
 }
 
 type Event = {
@@ -59,6 +60,11 @@ export interface Env {
 	DISCORD_TOKEN: string,
 }
 
+const PREFIXES = [
+	'@everyone\nMark these events down in your schedule for the upcoming week:',
+	"@everyone, we've got some awesome events planned in the next week!"
+]
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		if (request.headers.get('X-Clippy') !== 'true') {
@@ -76,7 +82,8 @@ export default {
 async function publishEvents(env: Env) {
 	const events = await getEvents()
 	const embeds = events.map(formatEvent)
-	return await postEmbeds(env, embeds).then(res => res.map(r => r.json()))
+	const prefix = PREFIXES[Math.floor(Math.random() * PREFIXES.length)]
+	return await postEmbeds(env, { embeds, content: prefix }).then(res => res.map(r => r.json()))
 }
 
 async function getEvents(): Promise<Event[]> {
@@ -105,15 +112,15 @@ function formatEvent(event: Event): Embed {
 	}
 }
 
-async function postEmbeds(env: Env, embeds: Embed[]): Promise<any[]> {
+async function postEmbeds(env: Env, { embeds, content }: { embeds: Embed[], content?: string }): Promise<any[]> {
 	if (embeds.length == 0)
 		return []
 	if (embeds.length > 10) {
-		const res = await postEmbeds(env, embeds.slice(0, 10))
-		res.push(...await postEmbeds(env, embeds.slice(10)))
+		const res = await postEmbeds(env, { embeds: embeds.slice(0, 10), content })
+		res.push(...await postEmbeds(env, { embeds: embeds.slice(10) }))
 		return res
 	}
-	return [await post(env, { embeds })]
+	return [await post(env, { embeds, content })]
 }
 
 async function post(env: Env, message: Message) {
