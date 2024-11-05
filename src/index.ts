@@ -80,6 +80,7 @@ export default {
 };
 
 async function publishEvents(env: Env) {
+	// Create event object
 	const events = await getEvents()
 	const embeds = events.map(formatEvent)
 	const prefix = PREFIXES[Math.floor(Math.random() * PREFIXES.length)]
